@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import AVFoundation
 
 struct PermissionStatus: Equatable {
@@ -14,6 +15,7 @@ enum MicrophonePermission: Equatable {
 
 struct PermissionState: Equatable {
     var screenCapture: PermissionStatus
+    var accessibility: PermissionStatus
 }
 
 protocol PermissionService {
@@ -26,12 +28,16 @@ protocol PermissionService {
     func cameraStatus() -> MicrophonePermission
     func requestCameraAccess(completion: (@MainActor @Sendable () -> Void)?)
     func openCameraSettings()
+    func accessibilityGranted() -> Bool
+    func requestAccessibilityAccess()
+    func openAccessibilitySettings()
 }
 
 final class SystemPermissionService: PermissionService {
     func currentState() -> PermissionState {
         PermissionState(
-            screenCapture: PermissionStatus(isGranted: CGPreflightScreenCaptureAccess())
+            screenCapture: PermissionStatus(isGranted: CGPreflightScreenCaptureAccess()),
+            accessibility: PermissionStatus(isGranted: AXIsProcessTrusted())
         )
     }
 
@@ -89,6 +95,25 @@ final class SystemPermissionService: PermissionService {
 
     func openCameraSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func accessibilityGranted() -> Bool {
+        AXIsProcessTrusted()
+    }
+
+    func requestAccessibilityAccess() {
+        // Registers ZoomIt in System Settings > Privacy & Security > Accessibility
+        // (unchecked) and, on some macOS versions, surfaces the system prompt.
+        // Uses the raw key name instead of the `kAXTrustedCheckOptionPrompt`
+        // global (an `Unmanaged<CFString>`) to avoid a Swift concurrency-safety
+        // diagnostic on that shared global.
+        let options: [CFString: Bool] = ["AXTrustedCheckOptionPrompt" as CFString: true]
+        _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
+    }
+
+    func openAccessibilitySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
         NSWorkspace.shared.open(url)
     }
 }

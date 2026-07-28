@@ -234,15 +234,12 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         self.window = win
         // Become a regular app while editing so the window appears in the Dock
         // and Cmd-Tab, letting the user switch away and return; restored to
-        // accessory on close. Switching from .accessory needs a runloop hop to
-        // make the Dock tile appear reliably. Bring the editor to the front once
-        // when it first appears (it stays a normal-level window afterwards, so
-        // it can be sent behind other apps).
+        // accessory on close (unless another window still needs it). Bring the
+        // editor to the front once when it first appears (it stays a
+        // normal-level window afterwards, so it can be sent behind other apps).
         win.makeKeyAndOrderFront(nil)
+        RegularActivationPolicy.acquire(for: self)
         DispatchQueue.main.async {
-            ZoomItAppIcon.apply()
-            NSApp.setActivationPolicy(.regular)
-            ZoomItAppIcon.apply()
             NSApp.activate(ignoringOtherApps: true)
             win.makeKeyAndOrderFront(nil)
         }
@@ -601,7 +598,7 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
     func windowWillClose(_ notification: Notification) {
         tearDownPlayback()
         window = nil
-        NSApp.setActivationPolicy(.accessory)
+        RegularActivationPolicy.release(for: self)
         onCancel?(); onCancel = nil; onSave = nil
     }
 
@@ -609,7 +606,7 @@ final class VideoClipEditorController: NSObject, NSWindowDelegate, VideoTimeline
         tearDownPlayback()
         window?.orderOut(nil)
         window = nil
-        NSApp.setActivationPolicy(.accessory)
+        RegularActivationPolicy.release(for: self)
     }
 
     private func tearDownPlayback() {

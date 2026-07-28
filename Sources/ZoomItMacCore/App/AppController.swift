@@ -61,6 +61,10 @@ final class AppController: NSObject {
     }
 
     @objc func checkPermissions() {
+        // Cancel any pending re-presentation scheduled by a previous invocation
+        // (e.g. after sending the user to System Settings) so re-invoking this
+        // command manually can't collide with it and open a second dialog.
+        clearPermissionReactivationObserver()
         presentPermissionsDialog()
     }
 
@@ -75,6 +79,7 @@ final class AppController: NSObject {
         let screenGranted = state.screenCapture.isGranted
         let micStatus = permissionService.microphoneStatus()
         let camStatus = permissionService.cameraStatus()
+        let accessibilityGranted = state.accessibility.isGranted
         func describe(_ status: MicrophonePermission) -> String {
             switch status {
             case .granted: return "Granted"
@@ -89,8 +94,9 @@ final class AppController: NSObject {
         Screen Recording: \(screenGranted ? "Granted" : "Missing")
         Microphone: \(describe(micStatus))
         Camera: \(describe(camStatus))
+        Accessibility: \(accessibilityGranted ? "Granted" : "Missing")
 
-        Screen Recording is required for zoom, snip, and recording. Microphone and Camera are optional — used for recording your voice and webcam.
+        Screen Recording is required for zoom, snip, and recording. Microphone and Camera are optional — used for recording your voice and webcam. Accessibility is required for DemoType.
 
         Newly granted Screen Recording takes effect after you relaunch ZoomIt.
         """
@@ -98,6 +104,7 @@ final class AppController: NSObject {
         alert.addButton(withTitle: screenGranted ? "Screen Recording Settings…" : "Grant Screen Recording…")
         alert.addButton(withTitle: micStatus == .notDetermined ? "Grant Microphone…" : "Microphone Settings…")
         alert.addButton(withTitle: camStatus == .notDetermined ? "Grant Camera…" : "Camera Settings…")
+        alert.addButton(withTitle: accessibilityGranted ? "Accessibility Settings…" : "Grant Accessibility…")
         // Use a standard macOS-style rounded-square icon so the dialog matches
         // the look of system permission prompts and the icon top lines up with
         // the message text.
@@ -107,8 +114,14 @@ final class AppController: NSObject {
         alert.window.animationBehavior = .none
         NSApp.activate(ignoringOtherApps: true)
 
-        switch alert.runModal() {
-        case .alertSecondButtonReturn:
+        let response = alert.runModal()
+        let screenRecordingButton = NSApplication.ModalResponse.alertSecondButtonReturn
+        let microphoneButton = NSApplication.ModalResponse.alertThirdButtonReturn
+        let cameraButton = NSApplication.ModalResponse(rawValue: microphoneButton.rawValue + 1)
+        let accessibilityButton = NSApplication.ModalResponse(rawValue: microphoneButton.rawValue + 2)
+
+        switch response {
+        case screenRecordingButton:
             if screenGranted {
                 permissionService.openSystemSettings()
                 representWhenActive()
@@ -118,7 +131,7 @@ final class AppController: NSObject {
                     presentPermissionsDialog()
                 }
             }
-        case .alertThirdButtonReturn:
+        case microphoneButton:
             if micStatus == .notDetermined {
                 // Wait for the system prompt to resolve, then re-present so the
                 // dialog doesn't collide with it and shows the updated status.
@@ -129,7 +142,7 @@ final class AppController: NSObject {
                 permissionService.openMicrophoneSettings()
                 representWhenActive()
             }
-        case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
+        case cameraButton:
             if camStatus == .notDetermined {
                 permissionService.requestCameraAccess { [weak self] in
                     self?.presentPermissionsDialog()
@@ -138,6 +151,14 @@ final class AppController: NSObject {
                 permissionService.openCameraSettings()
                 representWhenActive()
             }
+        case accessibilityButton:
+            if accessibilityGranted {
+                permissionService.openAccessibilitySettings()
+            } else {
+                permissionService.requestAccessibilityAccess()
+                permissionService.openAccessibilitySettings()
+            }
+            representWhenActive()
         default:
             break
         }
@@ -147,10 +168,7 @@ final class AppController: NSObject {
     /// Used after sending the user to System Settings so the dialog reappears
     /// when they switch back, without stealing focus from System Settings.
     private func representWhenActive() {
-        if let permissionReactivationObserver {
-            NotificationCenter.default.removeObserver(permissionReactivationObserver)
-            self.permissionReactivationObserver = nil
-        }
+        clearPermissionReactivationObserver()
         permissionReactivationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
@@ -158,12 +176,18 @@ final class AppController: NSObject {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                if let observer = self.permissionReactivationObserver {
-                    NotificationCenter.default.removeObserver(observer)
-                    self.permissionReactivationObserver = nil
-                }
+                self.clearPermissionReactivationObserver()
                 self.presentPermissionsDialog()
             }
+        }
+    }
+
+    /// Removes the pending re-presentation observer, if any, so it can't fire
+    /// and open a duplicate permissions dialog alongside a fresh invocation.
+    private func clearPermissionReactivationObserver() {
+        if let permissionReactivationObserver {
+            NotificationCenter.default.removeObserver(permissionReactivationObserver)
+            self.permissionReactivationObserver = nil
         }
     }
 

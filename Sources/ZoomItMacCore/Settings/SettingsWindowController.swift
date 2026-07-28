@@ -131,6 +131,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         demoTypeHotKeyButton?.title = demoTypeHotKeyDisplayString()
         panoramaHotKeyButton?.title = panoramaHotKeyDisplayString()
         launchAtLoginCheckbox?.state = settings.launchAtLogin ? .on : .off
+        // Become a regular app while Settings is open so the window appears in
+        // the Dock and Cmd-Tab switcher, and can be switched back to; restored
+        // to accessory on close (unless another window still needs it).
+        RegularActivationPolicy.acquire(for: self)
         NSApp.activate(ignoringOtherApps: true)
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -140,6 +144,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // Cancel any in-progress recording (which resumes the global hotkeys if
         // they were suspended for capture).
         finishRecording()
+        RegularActivationPolicy.release(for: self)
     }
 
     // MARK: - Window construction
